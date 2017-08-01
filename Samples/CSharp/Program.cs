@@ -42,7 +42,7 @@
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authResult.AccessToken);
 
             var uriBuilder = new UriBuilder(warehouseUrl);
-            uriBuilder.Path += $"/{collectionName}";
+            uriBuilder.Path += "/" + collectionName;
 
             HttpResponseMessage response = httpClient.GetAsync(uriBuilder.Uri).Result;
 
