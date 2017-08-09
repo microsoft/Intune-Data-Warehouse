@@ -6,7 +6,7 @@ See LICENSE in the project root for license information.
 
 #>
 
-$ModulePath = "H:\publicdw\Intune-Data-Warehouse\Samples\PowerShell\IntuneDataWarehouseCmdlets.psm1"
+$ModulePath = "$PSScriptRoot\IntuneDataWarehouseCmdlets.psm1"
 
 if (Test-Path "$ModulePath") {
     Import-Module "$ModulePath"
