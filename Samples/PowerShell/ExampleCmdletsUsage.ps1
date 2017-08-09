@@ -20,10 +20,10 @@ else {
 
 if (!(Test-IntuneDataWarehouseAuthentication)) {
 
-    Write-Host "To use the Intune Data Warehouse, you must first connect providing a few details..."
+    Write-Host "To use the Intune Data Warehouse, you must first provide a few details..."
     $User = Read-Host "Enter the UPN of the user to authenticate as"
-    $ApplicationId = Read-Host "Enter the application ID of an AzureAD app that has access to the API"
-    $WarehouseURL = Read-Host "Enter the Intune Data Warehouse provided in the Azure portal"
+    $ApplicationId = Read-Host "Enter the application ID of an AzureAD app that has access to get data warehouse information from the Microsoft Intune API"
+    $WarehouseURL = Read-Host "Enter the Intune Data Warehouse URL provided in the Azure portal"
 
     Write-Host
     Write-Host "Authenticating..."

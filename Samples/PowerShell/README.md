@@ -14,8 +14,8 @@ This cmdlet establishes a connection to the Intune Data Warehouse by authenticat
 | Parameter     | Description           | Example  |
 | ------------- |-------------| -----|
 | User               | The UPN of the user for authentication | nick@example.com |
-| ApplicationId      | The application Id of an application in AzureAD with authorization to the API | 4184c61a-e324-4f51-83d7-022b6a82b991 |
-| DataWarehouseURL   | The URL to the data warehouse for your tenant. This can be found in the Azure portal. | https://fef.msua04.manage.microsoft.com/ReportingService/DataWarehouseFEService?api-version=beta |
+| ApplicationId      | The application Id of an application in AzureAD with authorization to get data warehouse information from the Microsoft Intune API | 4184c61a-e324-4f51-83d7-022b6a82b991 |
+| DataWarehouseURL   | The Intune Data Warehouse URL for your tenant. This can be found in the Azure portal. | https://fef.msua04.manage.microsoft.com/ReportingService/DataWarehouseFEService?api-version=beta |
 | CredentialsFile    | A path to a file that contains your user's credentials as a secure string. See below for more information. Optional, default behavior is interactive auth. | c:\credentials\creds.txt |
 | RedirectUri        | A valid redirect URI for the application setup in Azure AD represented by the ApplicationId parameter. Optional, default is "urn:ietf:wg:oauth:2.0:oob"      | https://localhost |
 
