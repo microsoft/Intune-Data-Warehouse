@@ -74,7 +74,7 @@ function Connect-IntuneDataWarehouse {
     [System.Reflection.Assembly]::LoadFrom($adal) | Out-Null
     [System.Reflection.Assembly]::LoadFrom($adalforms) | Out-Null
 
-    $resourceAppIdURI = "https://api.manage-selfhost.microsoft.com/"
+    $resourceAppIdURI = "https://api.manage.microsoft.com/"
     $authority = "https://login.windows.net/$Tenant"
 
     $authContext = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext" -ArgumentList $authority
