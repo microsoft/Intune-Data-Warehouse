@@ -74,45 +74,37 @@ function Connect-IntuneDataWarehouse {
     [System.Reflection.Assembly]::LoadFrom($adal) | Out-Null
     [System.Reflection.Assembly]::LoadFrom($adalforms) | Out-Null
 
-    $resourceAppIdURI = "https://api.manage.microsoft.com/"
+    $resourceAppIdURI = "https://api.manage-selfhost.microsoft.com/"
     $authority = "https://login.windows.net/$Tenant"
 
-    try {
-        $authContext = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext" -ArgumentList $authority
+    $authContext = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext" -ArgumentList $authority
 
-        # https://msdn.microsoft.com/en-us/library/azure/microsoft.identitymodel.clients.activedirectory.promptbehavior.aspx
-        # Change the prompt behaviour to force credentials each time: Auto, Always, Never, RefreshSession
-        $platformParameters = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.PlatformParameters" -ArgumentList "Auto"
-        $userId = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.UserIdentifier" -ArgumentList ($User, "OptionalDisplayableId")
+    # https://msdn.microsoft.com/en-us/library/azure/microsoft.identitymodel.clients.activedirectory.promptbehavior.aspx
+    # Change the prompt behaviour to force credentials each time: Auto, Always, Never, RefreshSession
+    $platformParameters = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.PlatformParameters" -ArgumentList "Auto"
+    $userId = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.UserIdentifier" -ArgumentList ($User, "OptionalDisplayableId")
 
-        if ($CredentialsFile -eq $null){
-            $authResult = $authContext.AcquireTokenAsync($resourceAppIdURI,$ApplicationId,$RedirectUri,$platformParameters,$userId).Result
+    if ($CredentialsFile -eq $null){
+        $authResult = $authContext.AcquireTokenAsync($resourceAppIdURI,$ApplicationId,$RedirectUri,$platformParameters,$userId).Result
+    }
+    else {
+        if (test-path "$CredentialsFile") {
+            $UserPassword = Get-Content "$CredentialsFile" | ConvertTo-SecureString
+            $userCredentials = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.UserPasswordCredential -ArgumentList $userUPN,$UserPassword
+            $authResult = [Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContextIntegratedAuthExtensions]::AcquireTokenAsync($authContext, $resourceAppIdURI, $ApplicationId, $userCredentials).Result;
         }
         else {
-            if (test-path "$CredentialsFile") {
-                $UserPassword = Get-Content "$CredentialsFile" | ConvertTo-SecureString
-                $userCredentials = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.UserPasswordCredential -ArgumentList $userUPN,$UserPassword
-                $authResult = [Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContextIntegratedAuthExtensions]::AcquireTokenAsync($authContext, $resourceAppIdURI, $ApplicationId, $userCredentials).Result;
-            }
-            else {
-                throw "Path to Password file $Password doesn't exist, please specify a valid path..."
-            }
-        }
-
-        if ($authResult.AccessToken) {
-            $global:intuneWarehouseAuthResult = $authResult;
-            $global:intuneWarehouseAuthUser = $User;
-            $global:intuneWarehouseURL = $DataWarehouseURL;
-        }
-        else {
-            throw "Authorization Access Token is null, please re-run authentication..."
+            throw "Path to Password file $Password doesn't exist, please specify a valid path..."
         }
     }
-    catch {
-        write-host $_.Exception.Message -f Red
-        write-host $_.Exception.ItemName -f Red
-        write-host
-        throw
+
+    if ($authResult.AccessToken) {
+        $global:intuneWarehouseAuthResult = $authResult;
+        $global:intuneWarehouseAuthUser = $User;
+        $global:intuneWarehouseURL = $DataWarehouseURL;
+    }
+    else {
+        throw "Authorization Access Token is null, please re-run authentication..."
     }
 }
 
@@ -137,28 +129,14 @@ function Get-IntuneDataWarehouseCollectionNames {
         throw "No authentication context. Authenticate first by running 'Connect-IntuneDataWarehouse'"
     }
 
-    try {
-        $headers = @{
-                    'Content-Type'='application/json'
-                    'Authorization'="Bearer " + $global:intuneWarehouseAuthResult.AccessToken
-                    'ExpiresOn'= $global:intuneWarehouseAuthResult.ExpiresOn
-                    };
-        $Collections = Invoke-WebRequest -Uri $global:intuneWarehouseURL -Method Get -Headers $headers
-        $AllCollections = ($Collections.content | ConvertFrom-Json).value.name | sort
-        return $AllCollections
-    }
-    catch {
-        $ex = $_.Exception
-        $errorResponse = $ex.Response.GetResponseStream()
-        $reader = New-Object System.IO.StreamReader($errorResponse)
-        $reader.BaseStream.Position = 0
-        $reader.DiscardBufferedData()
-        $responseBody = $reader.ReadToEnd();
-        Write-Host "Response content:`n$responseBody" -f Red
-        Write-Error "Request to $Uri failed with HTTP Status $($ex.Response.StatusCode) $($ex.Response.StatusDescription)"
-        write-host
-        throw
-    }
+    $headers = @{
+                'Content-Type'='application/json'
+                'Authorization'="Bearer " + $global:intuneWarehouseAuthResult.AccessToken
+                'ExpiresOn'= $global:intuneWarehouseAuthResult.ExpiresOn
+                };
+    $Collections = Invoke-WebRequest -Uri $global:intuneWarehouseURL -Method Get -Headers $headers
+    $AllCollections = ($Collections.content | ConvertFrom-Json).value.name | sort
+    return $AllCollections
 }
 
 <#
@@ -179,50 +157,54 @@ function Get-IntuneDataWarehouseCollection {
         [Parameter(Mandatory=$true)]
         $CollectionName,
         $Skip=0,
-        $Top=1000
+        $Top=10000,
+        [Switch]$All
     )
+
+    function Invoke-DataWarehouseRequest {
+        param
+        (
+            [Parameter(Mandatory=$True)]
+            $Url
+        )
+
+        $clientRequestId = [Guid]::NewGuid()
+        $headers = @{
+            'Content-Type'='application/json'
+            'Authorization'="Bearer " + $global:intuneWarehouseAuthResult.AccessToken
+            'ExpiresOn'= $global:intuneWarehouseAuthResult.ExpiresOn
+            'client-request-id'=$clientRequestId
+        }
+
+        Write-Verbose "Request URL = $URL"
+        Write-Verbose "Client request ID = $clientRequestId"
+
+        $Response = Invoke-WebRequest -Uri $URL -Method Get -Headers $headers
+        return $Response.content | ConvertFrom-Json
+    }
 
     if (!$global:intuneWarehouseAuthResult) {
         throw "No authentication context. Authenticate first by running 'Connect-IntuneDataWarehouse'"
     }
 
-    try {
-        # Verify that the request collection exists in the warehouse
-        $validCollectionNames = Get-IntuneDataWarehouseCollectionNames
+    # Verify that the request collection exists in the warehouse
+    $validCollectionNames = Get-IntuneDataWarehouseCollectionNames
 
-        if (!($validCollectionNames).contains("$CollectionName")) {
-            throw "Collection Name $CollectionName doesn't exist."
-        }
-        else {
-            $clientRequestId = [Guid]::NewGuid()
-            $headers = @{
-                            'Content-Type'='application/json'
-                            'Authorization'="Bearer " + $global:intuneWarehouseAuthResult.AccessToken
-                            'ExpiresOn'= $global:intuneWarehouseAuthResult.ExpiresOn
-                            'client-request-id'=$clientRequestId
-                        }
-            $URL = $global:intuneWarehouseURL.Insert($global:intuneWarehouseURL.IndexOf("?"), "/$collectionName")
-            $URL = "$URL&`$skip=$Skip&`$top=$Top"
-
-            Write-Verbose "Request URL = $URL"
-            Write-Verbose "Client request ID = $clientRequestId"
-            $Response = Invoke-WebRequest -Uri $URL -Method Get -Headers $headers
-
-            $responseJson = $Response.content | ConvertFrom-Json
-            return $responseJson.value
-        }
+    if (!($validCollectionNames).contains("$CollectionName")) {
+        throw "Collection Name $CollectionName doesn't exist."
     }
-    catch {
-        $ex = $_.Exception
-        $errorResponse = $ex.Response.GetResponseStream()
-        $reader = New-Object System.IO.StreamReader($errorResponse)
-        $reader.BaseStream.Position = 0
-        $reader.DiscardBufferedData()
-        $responseBody = $reader.ReadToEnd();
-        Write-Host "Response content:`n$responseBody" -f Red
-        Write-Error "Request to $Uri failed with HTTP Status $($ex.Response.StatusCode) $($ex.Response.StatusDescription)"
-        write-host
-        throw
+    else {
+        $URL = $global:intuneWarehouseURL.Insert($global:intuneWarehouseURL.IndexOf("?"), "/$collectionName")
+        if ($All -eq $False) {
+            $URL = "$URL&`$skip=$Skip&`$top=$Top"
+        }
+
+        do {
+            $response = Invoke-DataWarehouseRequest -Url $URL
+            Write-Output $response.value
+            $URL = $response.'@odata.nextLink'
+        }
+        while ($URL)
     }
 }
 
@@ -261,3 +243,4 @@ function Test-IntuneDataWarehouseAuthentication {
     }
     return $isAuthValid
 }
+

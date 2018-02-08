@@ -26,11 +26,11 @@ This cmdlet determines whether or not the current authentication context is vali
 | ------------- |-------------| -----|
 | User | Optional, checks if the provided user is logged in | nick@example.com |
 
-### IntuneDataWarehouseCollectionNames
+### Get-IntuneDataWarehouseCollectionNames
 
 This cmdlet takes no parameters. It will simply call the Intune Data Warehouse API and return back the list of available collections.
 
-### IntuneDataWarehouseCollection
+### Get-IntuneDataWarehouseCollection
 
 This cmdlet queries the Intune Data Warehouse API and gets data for a single collection. To page data from the API, utilize the Skip and Top parameters.
 
@@ -39,6 +39,7 @@ This cmdlet queries the Intune Data Warehouse API and gets data for a single col
 | CollectionName | The name of the collection to query | users |
 | Skip           | The number of entities to skip. Optional, default is 0 | 15 |
 | Top            | The number of entities to get from the API. Optional, default is 1000 | 100 |
+| All            | This is a switch parameter. If used, all of the collection data will be downloaded and written to pipeline in batches. | N/A
 
 ## Authenticating with a Credentials File
 
@@ -57,3 +58,21 @@ When calling Connect-IntuneDataWarehouse, pass "c:\temp\IntuneExport\credentials
 The password file that is generated is only valid for use in the authentication PowerShell script on the computer that was used to generate the file. It cannot be transferred or used on any other computer.
 
 As with any security-related script, ensure that you review the code and the code behavior with your company's security department or security representative to ensure it complies with your security policy.
+
+## Downloading Data to a CSV
+
+To download an entire collection to a CSV file, use ```Get-IntuneDataWarehouseCollection``` with the ```-All``` switch. This will write data to the pipeline in batches. You can then pipe each batch into a CSV conversion function and write it to a file. The reason for batching is to keep the memory usage low, since some of these collections can contain tens of millions of entities.
+
+Here is a simple of downloading the ```users``` collection to a CSV file:
+```
+Get-IntuneDataWarehouseCollection -CollectionName users -All -Verbose | ConvertTo-Csv -NoTypeInformation > users.csv
+```
+* Note that ```-Verbose``` is not needed, but will write debug output to the PowerShell window. This can help you see the progress being made.
+
+Here is a more general example of downloading all of your Data Warehouse collections to CSV files, one per collection:
+
+```
+Get-IntuneDataWarehouseCollectionNames | ForEach-Object {
+     Get-IntuneDataWarehouseCollection -CollectionName $_ -All -Verbose  | ConvertTo-Csv -NoTypeInformation > "$_.csv"
+}
+```
