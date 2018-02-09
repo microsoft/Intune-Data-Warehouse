@@ -39,7 +39,7 @@ This cmdlet queries the Intune Data Warehouse API and gets data for a single col
 | CollectionName | The name of the collection to query | users |
 | Skip           | The number of entities to skip. Optional, default is 0 | 15 |
 | Top            | The number of entities to get from the API. Optional, default is 1000 | 100 |
-| All            | This is a switch parameter. If used, all of the collection data will be downloaded and written to pipeline in batches. | N/A
+| All            | This is a switch parameter. If used, all of the collection data will be downloaded and written to pipeline in batches. When this switch is used, any Skip and Top parameters provided will be ignored. | N/A
 
 ## Authenticating with a Credentials File
 
