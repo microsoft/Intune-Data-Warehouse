@@ -39,7 +39,7 @@
             AuthenticationResult authResult = adalContext.AcquireTokenAsync(
                 resource: "https://api.manage.microsoft.com/",
                 clientId: applicationId,
-                userCredential: new UserPasswordCredential(emailAddress, password)).Result;
+                userCredential: new UserPasswordCredential(emailAddress, password.ToSecureString())).Result;
 
             var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authResult.AccessToken);

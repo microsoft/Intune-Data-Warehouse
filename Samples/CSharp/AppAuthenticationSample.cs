@@ -42,7 +42,7 @@
                 resource: "https://api.manage.microsoft.com/",
                 clientCredential: new ClientCredential(
                     applicationId, 
-                    new SecureClientSecret(ConvertToSecureStr(applicationSecret)))).Result;
+                    new SecureClientSecret(applicationSecret.ToSecureString()))).Result;
 
             var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
@@ -56,20 +56,6 @@
 
             Console.Write(response.Content.ReadAsStringAsync().Result);
             Console.ReadKey();
-        }
-
-        private static SecureString ConvertToSecureStr(string str)
-        {
-            if (str == null)
-                throw new ArgumentNullException("String must not be null.");
-
-            var secure = new SecureString();
-
-            foreach (char c in str)
-                secure.AppendChar(c);
-
-            secure.MakeReadOnly();
-            return secure;
         }
     }
 }
