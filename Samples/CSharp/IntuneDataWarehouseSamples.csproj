@@ -53,6 +53,7 @@
   <ItemGroup>
     <Compile Include="AppAuthenticationSample.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="SecureStringConversion.cs" />
     <Compile Include="UserAuthenticationSample.cs" />
   </ItemGroup>
   <ItemGroup>
