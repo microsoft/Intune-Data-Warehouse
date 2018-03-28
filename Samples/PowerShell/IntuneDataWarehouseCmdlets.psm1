@@ -155,10 +155,11 @@ function Get-IntuneDataWarehouseCollection {
     param
     (
         [Parameter(Mandatory=$true)]
-        $CollectionName,
-        $Skip=0,
-        $Top=10000,
-        [Switch]$All
+        [String]   $CollectionName,
+        [Int]      $Skip=0,
+        [Int]      $Top=10000,
+        [String[]] $PropertyList,
+        [Switch]   $All
     )
 
     function Invoke-DataWarehouseRequest {
@@ -197,6 +198,9 @@ function Get-IntuneDataWarehouseCollection {
         $URL = $global:intuneWarehouseURL.Insert($global:intuneWarehouseURL.IndexOf("?"), "/$collectionName")
         if ($All -eq $False) {
             $URL = "$URL&`$skip=$Skip&`$top=$Top"
+        }
+        if ($PropertyList.Count -gt 0) {
+            $URL = "$URL&`$select=$($PropertyList -join ',')"
         }
 
         do {
