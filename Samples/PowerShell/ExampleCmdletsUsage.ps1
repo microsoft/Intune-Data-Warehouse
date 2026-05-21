@@ -26,7 +26,7 @@ if (!(Test-IntuneDataWarehouseAuthentication)) {
     $WarehouseURL = Read-Host "Enter the Intune Data Warehouse URL provided in the Azure portal"
 
     Write-Host
-    Write-Host "Authenticating..."
+    Write-Host "Authenticating (interactive browser; pass -DeviceCode to Connect-IntuneDataWarehouse for terminal-only sign-in)..."
     Connect-IntuneDataWarehouse -User $User -ApplicationId $ApplicationId -DataWarehouseURL $WarehouseURL
 }
 

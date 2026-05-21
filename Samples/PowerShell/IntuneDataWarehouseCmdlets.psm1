@@ -1,34 +1,80 @@
 <#
- 
 .COPYRIGHT
-Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT license.
-See LICENSE in the project root for license information.
+Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the
+MIT license. See LICENSE in the project root for license information.
 
+.SYNOPSIS
+PowerShell cmdlets for accessing the Intune Data Warehouse OData endpoint.
+
+.DESCRIPTION
+This module wraps MSAL.PS token acquisition and OData paging against the
+Intune Data Warehouse. It demonstrates two supported auth flows:
+
+  - Interactive browser sign-in (default)
+  - Device code (terminal-friendly)
+
+The Resource Owner Password Credentials (ROPC) flow and the
+-CredentialsFile parameter that used it have been removed. ROPC is
+incompatible with MFA and Conditional Access and is not safe to copy into
+production. For unattended scenarios, use an app-only client-credentials
+flow (see Samples/CSharp/AppAuthenticationSample.cs) or a Managed Identity.
 #>
+
+#Requires -Module MSAL.PS
+
+# Intune Data Warehouse first-party AAD application ID. AAD issues tokens
+# whose aud claim equals this GUID. All token-acquisition call sites in this
+# module use "$script:IntuneDwhAppId/.default" as the MSAL scope.
+$script:IntuneDwhAppId = 'c161e42e-d4df-4a3d-9b42-e7a3c31f59d4'
 
 <#
 .SYNOPSIS
-    This function is used to authenticate with the Azure Active Directory using ADAL
+    Connects to the Intune Data Warehouse and caches an MSAL access token.
 .DESCRIPTION
-    The function authenticates with Azure Active Directory with a UserPrincipalName
+    Acquires a user (delegated) access token via MSAL.PS and stores it for
+    use by subsequent module cmdlets. Defaults to interactive browser
+    sign-in; pass -DeviceCode for a terminal-friendly flow.
+.PARAMETER ApplicationId
+    The application (client) ID of an AAD app registered in your tenant
+    with permission to read the Intune Data Warehouse API. The app must
+    be a Public client with http://localhost as a redirect URI when using
+    the default interactive flow.
+.PARAMETER User
+    UPN of the user to authenticate as. Used as a login hint and, when
+    -TenantId is not supplied, as the source of the tenant routing
+    domain.
+.PARAMETER DataWarehouseURL
+    The Intune Data Warehouse URL for your tenant (visible in the Azure
+    portal under Intune > Reports > Intune Data Warehouse).
+.PARAMETER TenantId
+    Optional. AAD tenant ID or verified domain. If omitted, the tenant is
+    derived from the UPN's domain.
+.PARAMETER DeviceCode
+    Switch. Use device-code flow instead of interactive browser sign-in.
 .EXAMPLE
-    Connect-IntuneDataWarehouse  -ApplicationId ee6e1234-5655-4321-83f4-ef4fd36ce1c2 -User user@tenant.onmicrosoft.com
-    Authenticates you to a specific Application ID within Azure Active Directory with the users UPN
-.NOTES
-    NAME: Connect-IntuneDataWarehouse
+    Connect-IntuneDataWarehouse -ApplicationId ee6e1234-5655-4321-83f4-ef4fd36ce1c2 `
+                                -User user@tenant.onmicrosoft.com `
+                                -DataWarehouseURL https://fef.msua01.manage.microsoft.com/...
+.EXAMPLE
+    Connect-IntuneDataWarehouse -ApplicationId ee6e... -User user@contoso.com `
+                                -DataWarehouseURL https://... -DeviceCode
 #>
 function Connect-IntuneDataWarehouse {
     [cmdletbinding()]
     param
     (
-        [Parameter(Mandatory=$true)]
-        $ApplicationId,
-        [Parameter(Mandatory=$true)]
-        $User,
-        [Parameter(Mandatory=$true)]
-        $DataWarehouseURL,
-        $CredentialsFile,
-        $RedirectUri='urn:ietf:wg:oauth:2.0:oob'
+        [Parameter(Mandatory = $true)]
+        [string]$ApplicationId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$User,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DataWarehouseURL,
+
+        [string]$TenantId,
+
+        [switch]$DeviceCode
     )
 
     if (Test-IntuneDataWarehouseAuthentication -User $User) {
@@ -36,215 +82,175 @@ function Connect-IntuneDataWarehouse {
         return
     }
 
-    $userUpn = New-Object "System.Net.Mail.MailAddress" -ArgumentList $User
-    $tenant = $userUpn.Host
-
-    # Finding the AzureAD cmdlets that can be used for authentication.
-    $AadModule = Get-Module -Name "AzureAD" -ListAvailable
-
-    if ($AadModule -eq $null) {
-        Write-Host "AzureAD PowerShell module not found, looking for AzureADPreview"
-        $AadModule = Get-Module -Name "AzureADPreview" -ListAvailable
+    if (-not $TenantId) {
+        $userUpn = New-Object 'System.Net.Mail.MailAddress' -ArgumentList $User
+        $TenantId = $userUpn.Host
     }
 
-    if ($AadModule -eq $null) {
-        throw "AzureAD Powershell module not installed...Install by running 'Install-Module AzureAD' or 'Install-Module AzureADPreview' from an elevated PowerShell prompt"
+    $scope = "$script:IntuneDwhAppId/.default"
+
+    $msalArgs = @{
+        ClientId  = $ApplicationId
+        TenantId  = $TenantId
+        Scopes    = $scope
+        LoginHint = $User
     }
 
-    # Getting path to Active Directory Assemblies
-    # If the module count is greater than 1 find the latest version
-    if ($AadModule.count -gt 1) {
-
-        $Latest_Version = ($AadModule | select version | Sort-Object)[-1]
-        $aadModule = $AadModule | ? { $_.version -eq $Latest_Version.version }
-
-        # Checking if there are multiple versions of the same module found
-        if ($AadModule.count -gt 1) {
-            $aadModule = $AadModule | select -Unique
-        }
-
-        $adal = Join-Path $AadModule.ModuleBase "Microsoft.IdentityModel.Clients.ActiveDirectory.dll"
-        $adalforms = Join-Path $AadModule.ModuleBase "Microsoft.IdentityModel.Clients.ActiveDirectory.Platform.dll"
+    if ($DeviceCode) {
+        $authResult = Get-MsalToken @msalArgs -DeviceCode
     }
     else {
-        $adal = Join-Path $AadModule.ModuleBase "Microsoft.IdentityModel.Clients.ActiveDirectory.dll"
-        $adalforms = Join-Path $AadModule.ModuleBase "Microsoft.IdentityModel.Clients.ActiveDirectory.Platform.dll"
+        $authResult = Get-MsalToken @msalArgs -Interactive
     }
 
-    [System.Reflection.Assembly]::LoadFrom($adal) | Out-Null
-    [System.Reflection.Assembly]::LoadFrom($adalforms) | Out-Null
-
-    $resourceAppIdURI = "https://api.manage.microsoft.com/"
-    $authority = "https://login.windows.net/$Tenant"
-
-    $authContext = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext" -ArgumentList $authority
-
-    # https://msdn.microsoft.com/en-us/library/azure/microsoft.identitymodel.clients.activedirectory.promptbehavior.aspx
-    # Change the prompt behaviour to force credentials each time: Auto, Always, Never, RefreshSession
-    $platformParameters = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.PlatformParameters" -ArgumentList "Auto"
-    $userId = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.UserIdentifier" -ArgumentList ($User, "OptionalDisplayableId")
-
-    if ($CredentialsFile -eq $null){
-        $authResult = $authContext.AcquireTokenAsync($resourceAppIdURI,$ApplicationId,$RedirectUri,$platformParameters,$userId).Result
+    if ($authResult -and $authResult.AccessToken) {
+        $global:intuneWarehouseAuthResult = $authResult
+        $global:intuneWarehouseAuthUser   = $User
+        $global:intuneWarehouseURL        = $DataWarehouseURL
     }
     else {
-        if (test-path "$CredentialsFile") {
-            $UserPassword = Get-Content "$CredentialsFile" | ConvertTo-SecureString
-            $userCredentials = New-Object Microsoft.IdentityModel.Clients.ActiveDirectory.UserPasswordCredential -ArgumentList $userUPN,$UserPassword
-            $authResult = [Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContextIntegratedAuthExtensions]::AcquireTokenAsync($authContext, $resourceAppIdURI, $ApplicationId, $userCredentials).Result;
-        }
-        else {
-            throw "Path to Password file $Password doesn't exist, please specify a valid path..."
-        }
-    }
-
-    if ($authResult.AccessToken) {
-        $global:intuneWarehouseAuthResult = $authResult;
-        $global:intuneWarehouseAuthUser = $User;
-        $global:intuneWarehouseURL = $DataWarehouseURL;
-    }
-    else {
-        throw "Authorization Access Token is null, please re-run authentication..."
+        throw "Authorization access token is null; re-run Connect-IntuneDataWarehouse."
     }
 }
 
 <#
 .SYNOPSIS
-    This function is used to get all the Intune Data Warehouse Collection Name
+    Lists all available Intune Data Warehouse collections.
 .DESCRIPTION
-    The function connects to the Data Warehouse URL and returns all Collection Name
+    Calls the service document on the configured Data Warehouse URL and
+    returns the sorted list of collection names.
 .EXAMPLE
     Get-IntuneDataWarehouseCollectionNames
-    Returns all Data Warehouse Collection names
-.NOTES
-    NAME: Get-IntuneDataWarehouseCollectionNames
 #>
 function Get-IntuneDataWarehouseCollectionNames {
     [cmdletbinding()]
-    param
-    (
-    )
+    param ()
 
-    if (!$global:intuneWarehouseAuthResult) {
-        throw "No authentication context. Authenticate first by running 'Connect-IntuneDataWarehouse'"
+    if (-not $global:intuneWarehouseAuthResult) {
+        throw "No authentication context. Authenticate first by running 'Connect-IntuneDataWarehouse'."
     }
 
     $headers = @{
-                'Content-Type'='application/json'
-                'Authorization'="Bearer " + $global:intuneWarehouseAuthResult.AccessToken
-                'ExpiresOn'= $global:intuneWarehouseAuthResult.ExpiresOn
-                };
-    $Collections = Invoke-WebRequest -Uri $global:intuneWarehouseURL -Method Get -Headers $headers
-    $AllCollections = ($Collections.content | ConvertFrom-Json).value.name | sort
+        'Content-Type'  = 'application/json'
+        'Authorization' = "Bearer $($global:intuneWarehouseAuthResult.AccessToken)"
+    }
+    $Collections = Invoke-WebRequest -Uri $global:intuneWarehouseURL -Method Get -Headers $headers -UseBasicParsing
+    $AllCollections = ($Collections.Content | ConvertFrom-Json).value.name | Sort-Object
     return $AllCollections
 }
 
 <#
 .SYNOPSIS
-    This function is used to get a collection of data from the Intune Data Warehouse
+    Returns rows from a single Intune Data Warehouse collection.
 .DESCRIPTION
-    The function connects to the Data Warehouse URL and returns a collection of data
+    Queries the Data Warehouse for the named collection. Supports paging
+    via -Skip / -Top, optional column projection via -PropertyList, and a
+    -All switch that follows @odata.nextLink batches.
 .EXAMPLE
     Get-IntuneDataWarehouseCollection -CollectionName devices
-    Returns all devices from the Data Warehouse
-.NOTES
-    NAME: Get-IntuneDataWarehouseCollection
+.EXAMPLE
+    Get-IntuneDataWarehouseCollection -CollectionName users -All -Verbose
 #>
 function Get-IntuneDataWarehouseCollection {
     [cmdletbinding()]
     param
     (
-        [Parameter(Mandatory=$true)]
-        [String]   $CollectionName,
-        [Int]      $Skip=0,
-        [Int]      $Top=10000,
-        [String[]] $PropertyList,
-        [Switch]   $All
+        [Parameter(Mandatory = $true)]
+        [string]   $CollectionName,
+        [int]      $Skip = 0,
+        [int]      $Top = 10000,
+        [string[]] $PropertyList,
+        [switch]   $All
     )
 
     function Invoke-DataWarehouseRequest {
         param
         (
-            [Parameter(Mandatory=$True)]
-            $Url
+            [Parameter(Mandatory = $true)]
+            [string]$Url
         )
 
         $clientRequestId = [Guid]::NewGuid()
         $headers = @{
-            'Content-Type'='application/json'
-            'Authorization'="Bearer " + $global:intuneWarehouseAuthResult.AccessToken
-            'ExpiresOn'= $global:intuneWarehouseAuthResult.ExpiresOn
-            'client-request-id'=$clientRequestId
+            'Content-Type'      = 'application/json'
+            'Authorization'     = "Bearer $($global:intuneWarehouseAuthResult.AccessToken)"
+            'client-request-id' = $clientRequestId
         }
 
-        Write-Verbose "Request URL = $URL"
+        Write-Verbose "Request URL = $Url"
         Write-Verbose "Client request ID = $clientRequestId"
 
-        $Response = Invoke-WebRequest -Uri $URL -Method Get -Headers $headers
-        return $Response.content | ConvertFrom-Json
+        $Response = Invoke-WebRequest -Uri $Url -Method Get -Headers $headers -UseBasicParsing
+        return $Response.Content | ConvertFrom-Json
     }
 
-    if (!$global:intuneWarehouseAuthResult) {
-        throw "No authentication context. Authenticate first by running 'Connect-IntuneDataWarehouse'"
+    if (-not $global:intuneWarehouseAuthResult) {
+        throw "No authentication context. Authenticate first by running 'Connect-IntuneDataWarehouse'."
     }
 
-    # Verify that the request collection exists in the warehouse
     $validCollectionNames = Get-IntuneDataWarehouseCollectionNames
 
-    if (!($validCollectionNames).contains("$CollectionName")) {
-        throw "Collection Name $CollectionName doesn't exist."
+    if (-not ($validCollectionNames.Contains($CollectionName))) {
+        throw "Collection name '$CollectionName' doesn't exist."
     }
-    else {
-        $URL = $global:intuneWarehouseURL.Insert($global:intuneWarehouseURL.IndexOf("?"), "/$collectionName")
-        if ($All -eq $False) {
-            $URL = "$URL&`$skip=$Skip&`$top=$Top"
-        }
-        if ($PropertyList.Count -gt 0) {
-            $URL = "$URL&`$select=$($PropertyList -join ',')"
-        }
 
-        do {
-            $response = Invoke-DataWarehouseRequest -Url $URL
-            Write-Output $response.value
-            $URL = $response.'@odata.nextLink'
-        }
-        while ($URL)
+    $URL = $global:intuneWarehouseURL.Insert($global:intuneWarehouseURL.IndexOf('?'), "/$CollectionName")
+    if (-not $All) {
+        $URL = "$URL&`$skip=$Skip&`$top=$Top"
     }
+    if ($PropertyList -and $PropertyList.Count -gt 0) {
+        $URL = "$URL&`$select=$($PropertyList -join ',')"
+    }
+
+    do {
+        $response = Invoke-DataWarehouseRequest -Url $URL
+        Write-Output $response.value
+        $URL = $response.'@odata.nextLink'
+    }
+    while ($URL)
 }
 
 <#
 .SYNOPSIS
-    Tests whether or not the current authentication context is valid.
+    Tests whether the cached authentication context is valid.
 .DESCRIPTION
-    The function tests whether or not the current authentication context is valid
-    Optionally pass a user to scope it down further. If this returns $False, then
-    Connect-IntuneDataWarehouse should be run.
+    Returns $true when a non-expired MSAL access token is cached for the
+    optionally specified user. Token expiry is computed against MSAL's
+    ExpiresOn (a DateTimeOffset) using TotalMinutes to avoid the
+    component-vs-total bug present in the previous ADAL-based module.
 .EXAMPLE
     Test-IntuneDataWarehouseAuthentication
-    Test-IntuneDataWarehouseAuthentication -User nick@example.com
-.NOTES
-    NAME: Test-IntuneDataWarehouseAuthentication
+.EXAMPLE
+    Test-IntuneDataWarehouseAuthentication -User user@contoso.com
 #>
 function Test-IntuneDataWarehouseAuthentication {
     [cmdletbinding()]
     param
     (
-        $User
+        [string]$User
     )
 
-    $isAuthValid = $False
-
-    if ($global:intuneWarehouseAuthResult) {
-        # Setting DateTime to Universal time to work in all timezones
-        $DateTime = (Get-Date).ToUniversalTime()
-
-        # If the authToken exists checking when it expires
-        $TokenExpires = ($global:intuneWarehouseAuthResult.ExpiresOn.datetime - $DateTime).Minutes
-
-        if ($TokenExpires -gt 0 -and (!$User -or $User -eq $global:intuneWarehouseAuthUser)) {
-            $isAuthValid = $True
-        }
+    if (-not $global:intuneWarehouseAuthResult) {
+        return $false
     }
-    return $isAuthValid
+
+    $expiresOnUtc = $global:intuneWarehouseAuthResult.ExpiresOn.UtcDateTime
+    $nowUtc       = (Get-Date).ToUniversalTime()
+    $minutesLeft  = ($expiresOnUtc - $nowUtc).TotalMinutes
+
+    if ($minutesLeft -le 0) {
+        return $false
+    }
+
+    if ($User -and $User -ne $global:intuneWarehouseAuthUser) {
+        return $false
+    }
+
+    return $true
 }
 
+Export-ModuleMember -Function `
+    Connect-IntuneDataWarehouse, `
+    Get-IntuneDataWarehouseCollectionNames, `
+    Get-IntuneDataWarehouseCollection, `
+    Test-IntuneDataWarehouseAuthentication
