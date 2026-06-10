@@ -1,78 +1,132 @@
 # Access the Intune Data Warehouse with PowerShell
 
-Provided are some example PowerShell scripts and a module to help you get started with accessing the Intune Data Warehouse with PowerShell.
+Sample PowerShell module and example script for querying the Intune Data
+Warehouse OData endpoint.
 
-## PowerShell Module
+> **2026 modernization** — this module now uses **MSAL.PS** for token
+> acquisition. The deprecated ADAL library and the Resource Owner Password
+> Credentials (ROPC) flow have been **removed**. See the
+> [Why ROPC was removed](#why-ropc-was-removed) section below for the
+> migration path if you were using `-CredentialsFile`.
 
-The IntuneDataWarehouseCmdlets.psm1 PowerShell module exposes a few functions to provide basic access to the Intune Data Warehouse API. For an example of how to use the module, take a look at **ExampleCmdletsUsage.ps1**.
+## Prerequisites
 
-The module exposes 3 basic cmdlets which should cover all of the interaction with the API that are needed.
+- PowerShell 5.1 or PowerShell 7+
+- The [`MSAL.PS`](https://www.powershellgallery.com/packages/MSAL.PS) module
+  from the PowerShell Gallery:
+  ```powershell
+  Install-Module -Name MSAL.PS -Scope CurrentUser
+  ```
+- An AAD app registration in your tenant with permission to read the Intune
+  Data Warehouse API. For interactive sign-in the app must be a **Public
+  client** with `http://localhost` registered as a redirect URI.
+
+## Quick start
+
+```powershell
+Import-Module .\IntuneDataWarehouseCmdlets.psm1
+
+Connect-IntuneDataWarehouse `
+    -ApplicationId 'ee6e1234-5655-4321-83f4-ef4fd36ce1c2' `
+    -User          'user@contoso.com' `
+    -DataWarehouseURL 'https://fef.msua01.manage.microsoft.com/ReportingService/DataWarehouseFEService?api-version=v1.0'
+
+Get-IntuneDataWarehouseCollectionNames
+Get-IntuneDataWarehouseCollection -CollectionName devices -Top 100
+```
+
+To sign in from a terminal where a browser is not available, add
+`-DeviceCode`:
+
+```powershell
+Connect-IntuneDataWarehouse -ApplicationId '…' -User '…' -DataWarehouseURL '…' -DeviceCode
+```
+
+For an end-to-end walkthrough, see **`ExampleCmdletsUsage.ps1`**.
+
+## Cmdlets
 
 ### Connect-IntuneDataWarehouse
-This cmdlet establishes a connection to the Intune Data Warehouse by authenticating and caching information that will be needed in subsequent requests. These include:
 
-| Parameter     | Description           | Example  |
-| ------------- |-------------| -----|
-| User               | The UPN of the user for authentication | nick@example.com |
-| ApplicationId      | The application Id of an application in AzureAD with authorization to get data warehouse information from the Microsoft Intune API | 4184c61a-e324-4f51-83d7-022b6a82b991 |
-| DataWarehouseURL   | The Intune Data Warehouse URL for your tenant. This can be found in the Azure portal. | https://fef.msua04.manage.microsoft.com/ReportingService/DataWarehouseFEService?api-version=beta |
-| CredentialsFile    | A path to a file that contains your user's credentials as a secure string. See below for more information. Optional, default behavior is interactive auth. | c:\credentials\creds.txt |
-| RedirectUri        | A valid redirect URI for the application setup in Azure AD represented by the ApplicationId parameter. Optional, default is "urn:ietf:wg:oauth:2.0:oob"      | https://localhost |
+Acquires an MSAL access token and caches it for use by subsequent cmdlets.
+
+| Parameter | Required | Description |
+| --- | --- | --- |
+| `ApplicationId` | Yes | Client ID of your AAD app registration. |
+| `User` | Yes | UPN to authenticate as. Used as MSAL `-LoginHint` and (when `-TenantId` is omitted) as the source of the tenant routing domain. |
+| `DataWarehouseURL` | Yes | The Intune Data Warehouse URL from the Azure portal. |
+| `TenantId` | No | AAD tenant ID or verified domain. Override when the user's UPN domain does not match the tenant (B2B, guest, vanity domains). |
+| `DeviceCode` | No | Switch. Use device-code flow instead of interactive browser sign-in. |
 
 ### Test-IntuneDataWarehouseAuthentication
-This cmdlet determines whether or not the current authentication context is valid. This can be scoped to any user or a particular user. The return is $True if it is valid, $False if it is not. If $False is returned, Connect-IntuneDataWarehouse will need to be run before accessing any collections.
 
-| Parameter     | Description           | Example  |
-| ------------- |-------------| -----|
-| User | Optional, checks if the provided user is logged in | nick@example.com |
+Returns `$true` when a non-expired token is cached, optionally scoped to a
+specific UPN. Returns `$false` otherwise — in which case
+`Connect-IntuneDataWarehouse` should be re-run.
 
 ### Get-IntuneDataWarehouseCollectionNames
 
-This cmdlet takes no parameters. It will simply call the Intune Data Warehouse API and return back the list of available collections.
+Returns the sorted list of available collection names.
 
 ### Get-IntuneDataWarehouseCollection
 
-This cmdlet queries the Intune Data Warehouse API and gets data for a single collection. To page data from the API, utilize the Skip and Top parameters.
+Queries a single collection.
 
-| Parameter     | Description           | Example  |
-| ------------- |-------------| -----|
-| CollectionName | The name of the collection to query | users |
-| Skip           | The number of entities to skip. Optional, default is 0 | 15 |
-| Top            | The number of entities to get from the API. Optional, default is 1000 | 100 |
-| All            | This is a switch parameter. If used, all of the collection data will be downloaded and written to pipeline in batches. When this switch is used, any Skip and Top parameters provided will be ignored. | N/A
+| Parameter | Description |
+| --- | --- |
+| `CollectionName` | Required. The collection to query. |
+| `Skip` | Optional. Number of entities to skip. Default 0. |
+| `Top` | Optional. Maximum number of entities to return. Default 10000. |
+| `PropertyList` | Optional. Project specific columns. |
+| `All` | Switch. Follow `@odata.nextLink` and emit all pages. When set, `Skip`/`Top` are ignored. |
 
-## Authenticating with a Credentials File
+## Why ROPC was removed
 
-Instead of using interactive authentication for each session, the Connect-IntuneDataWarehouse cmdlet also accepts a credential file to authenticate the user.
+Previous versions of this module accepted a `-CredentialsFile` parameter that
+loaded an encrypted password and submitted it to AAD using the **Resource
+Owner Password Credentials (ROPC)** grant. ROPC has been removed because:
 
-To create a credential file, simply run this command:
+- It is incompatible with **multi-factor authentication**.
+- It is incompatible with **Conditional Access** (device compliance, named
+  locations, sign-in risk).
+- It cannot authenticate **passwordless / FIDO2 / Windows Hello** users.
+- It requires customer code to handle plaintext user passwords, which is an
+  anti-pattern.
 
+**If you were using `-CredentialsFile`**, migrate to one of the following:
+
+- **App-only auth (recommended for unattended scripts)** — see
+  `Samples/CSharp/AppAuthenticationSample.cs` for the C# equivalent, or
+  call MSAL.PS yourself:
+  ```powershell
+  $token = Get-MsalToken -ClientId $appId -TenantId $tenantId `
+      -ClientSecret (ConvertTo-SecureString $secret -AsPlainText -Force) `
+      -Scopes "<INTUNE-DWH-APP-ID>/.default"
+  ```
+  In production, source the secret from Azure Key Vault or use a Managed
+  Identity instead of an env-var / file.
+- **Managed Identity** — if the script runs in Azure-hosted compute.
+- **Interactive or device-code** — if the workflow is genuinely
+  user-driven, use the default flow or `-DeviceCode`.
+
+## Downloading data to CSV
+
+Same pattern as before — pipe `Get-IntuneDataWarehouseCollection -All` into
+`ConvertTo-Csv`:
+
+```powershell
+Get-IntuneDataWarehouseCollection -CollectionName users -All -Verbose |
+    ConvertTo-Csv -NoTypeInformation > users.csv
 ```
-Read-Host -Prompt "Enter your tenant password" -AsSecureString | ConvertFrom-SecureString | Out-File "c:\temp\IntuneExport\credentials.txt"
-```
 
-When calling Connect-IntuneDataWarehouse, pass "c:\temp\IntuneExport\credentials.txt" as the value to the -CredentialsFile parameter.
+To dump every collection to its own CSV:
 
-**Note:**
-
-The password file that is generated is only valid for use in the authentication PowerShell script on the computer that was used to generate the file. It cannot be transferred or used on any other computer.
-
-As with any security-related script, ensure that you review the code and the code behavior with your company's security department or security representative to ensure it complies with your security policy.
-
-## Downloading Data to a CSV
-
-To download an entire collection to a CSV file, use ```Get-IntuneDataWarehouseCollection``` with the ```-All``` switch. This will write data to the pipeline in batches. You can then pipe each batch into a CSV conversion function and write it to a file. The reason for batching is to keep the memory usage low, since some of these collections can contain tens of millions of entities.
-
-Here is a simple of downloading the ```users``` collection to a CSV file:
-```
-Get-IntuneDataWarehouseCollection -CollectionName users -All -Verbose | ConvertTo-Csv -NoTypeInformation > users.csv
-```
-* Note that ```-Verbose``` is not needed, but will write debug output to the PowerShell window. This can help you see the progress being made.
-
-Here is a more general example of downloading all of your Data Warehouse collections to CSV files, one per collection:
-
-```
+```powershell
 Get-IntuneDataWarehouseCollectionNames | ForEach-Object {
-     Get-IntuneDataWarehouseCollection -CollectionName $_ -All -Verbose  | ConvertTo-Csv -NoTypeInformation > "$_.csv"
+    Get-IntuneDataWarehouseCollection -CollectionName $_ -All -Verbose |
+        ConvertTo-Csv -NoTypeInformation > "$_.csv"
 }
 ```
+
+As with any security-related script, review the code with your security
+team before deploying.
